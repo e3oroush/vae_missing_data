@@ -47,3 +47,16 @@ def get_mnist_test_loader(batch_size=128):
     datasets.MNIST('./data', train=False, transform=transforms.ToTensor()),
     batch_size=batch_size, shuffle=True)
   return test_loader
+
+
+
+
+def store_model(model_filepath, model):
+    checkpoint={'model':model.state_dict(),
+                }
+    torch.save(checkpoint,model_filepath)
+
+def load_model(model_filepath, model):
+    checkpoint=torch.load(model_filepath)
+    model.load_state_dict(checkpoint['model'])
+    return model

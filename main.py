@@ -4,11 +4,12 @@ from torch.nn import functional as F
 from torchvision.utils import save_image
 from tqdm import tqdm
 from modules import VAE, MNIST_DIM
-from utils import get_mnist_train_loader, get_mnist_test_loader, get_logger
+from utils import get_mnist_train_loader, get_mnist_test_loader, get_logger, store_model, load_model
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.cm as cm
 from argparse import ArgumentParser
+import os
 
 logger = get_logger("VAE")
 
@@ -96,22 +97,28 @@ def train(model: Module, device, total_epochs):
     reconstruct(model, next(iter(get_mnist_test_loader(batch_size=8)))[0].to(device), 
                       "results/reconstruction-{}.png".format(epoch))
     sampling(model, 64, "results/sampling-{}.png".format(epoch),device)
-    
-
-
-
 
 
 if __name__ == "__main__":
   parser = ArgumentParser(description="VAE example")
   parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
+  parser.add_argument('--dropout', type=float, default=0.5, metavar='N',
+                    help='Dropout probability to set inputs zero. (default: 0.5)')
   parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
+  model_filepath = "model.pth"
   args = parser.parse_args()
   is_cuda= not args.no_cuda
   device = torch.device("cuda" if is_cuda else "cpu")
-  model = VAE().to(device)
+  model = VAE(dropout=args.dropout).to(device)
+  try:
+    model = load_model(model_filepath, model)
+    logger.info("Loading model from {}".format(model_filepath))
+  except:
+    logger.info("Creating VAE model from scratch")
   train(model, device, args.epochs)
+  model.to(torch.device("cpu"))
+  store_model(model_filepath, model)
 
 

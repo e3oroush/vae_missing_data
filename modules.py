@@ -6,14 +6,15 @@ from torch.nn import functional as F
 MNIST_DIM=784
 
 class FCEncoder(Module):
-  def __init__(self, hidden_size, latent_size):
+  def __init__(self, hidden_size, latent_size, dropout):
     super(FCEncoder, self).__init__()
     self.fc1 = nn.Linear(MNIST_DIM,hidden_size)
     self.fc_mu = nn.Linear(hidden_size, latent_size)
     self.fc_logvar = nn.Linear(hidden_size, latent_size)
+    self.dropout = nn.Dropout(dropout)
   
   def forward(self, x):
-    h1 = F.relu(self.fc1(x))
+    h1 = F.relu(self.fc1(self.dropout(x)))
     mu = self.fc_mu(h1)
     logvar = self.fc_logvar(h1)
     return mu, logvar
@@ -30,10 +31,10 @@ class FCDecoder(Module):
     return x_hat
 
 class VAE(Module):
-  def __init__(self, latent_size=2, hidden_size=400):
+  def __init__(self, latent_size=2, hidden_size=400, dropout=0.5):
     super(VAE,self).__init__()
     self.latent_size = latent_size
-    self.encoder = FCEncoder(hidden_size, latent_size)
+    self.encoder = FCEncoder(hidden_size, latent_size, dropout)
     self.decoder = FCDecoder(hidden_size, latent_size)
   def reparameterization(self, mu, logvar):
     std = torch.exp(0.5*logvar)
