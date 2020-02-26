@@ -1,0 +1,3 @@
+git+https://github.com/TimeSynth/TimeSynth.git
+numpy
+matplotlib
