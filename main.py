@@ -4,7 +4,8 @@ from torch.nn import functional as F
 from torchvision.utils import save_image
 from tqdm import tqdm
 from modules import VAE, MNIST_DIM
-from utils import get_mnist_train_loader, get_mnist_test_loader, get_logger, store_model, load_model
+from utils import (get_mnist_train_loader, get_mnist_test_loader, get_logger, store_model, 
+        load_model, get_synthetic_timeseries_test_loader, get_synthetic_timeseries_train_loader)
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.cm as cm
@@ -14,18 +15,23 @@ import os
 logger = get_logger("VAE")
 
 # Reconstruction + KL divergence losses summed over all elements and batch
-def compute_loss(recon_x, x, mu, logvar):
-    BCE = F.binary_cross_entropy(recon_x, x.view(-1, MNIST_DIM), reduction='sum')
+def compute_loss_mnist(recon_x, x, mu, logvar):
+  BCE = F.binary_cross_entropy(recon_x, x.view(-1, MNIST_DIM), reduction='sum')
 
-    # see Appendix B from VAE paper:
-    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-    # https://arxiv.org/abs/1312.6114
-    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+  # see Appendix B from VAE paper:
+  # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
+  # https://arxiv.org/abs/1312.6114
+  # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+  KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return BCE + KLD
+  return BCE + KLD
 
-def reconstruct(model: Module, data, path):
+def compute_loss_timeseries(x_hat, x, mu, logvar):
+  reconstruction_loss = F.mse_loss(x_hat, x, reduction='sum')
+  KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+  return reconstruction_loss + KLD
+
+def reconstruct_mnist(model: Module, data, path):
   n = len(data)
   model.eval()
   width = int(np.sqrt(MNIST_DIM))
@@ -34,7 +40,23 @@ def reconstruct(model: Module, data, path):
     image = torch.cat([data,x_hat.view(n,1,width, width)])
     save_image(image.cpu(), path, nrow=n)
 
-def sampling(model: Module, n, path, device):
+def reconstruct_timeseries(model: Module, data, path):
+  n = len(data)
+  model.eval()
+  fig, ax = plt.subplots(n,1)
+  with torch.no_grad():
+    x_hat, _, _, _ = model(data)
+    x_hat=x_hat.view(*data.shape)
+    x_hat = x_hat.cpu().numpy()
+    x = data.cpu().numpy()
+    for i in range(n):
+      xi = x[i][0] if model.dim > 1 else x[i]
+      x_hati = x_hat[i][0] if model.dim > 1 else x_hat[i]
+      ax[i].plot(xi,'b-')
+      ax[i].plot(x_hati,'r-')
+  fig.savefig(path, dpi=300)
+
+def sampling_mnist(model: Module, n, path, device):
   model.eval()
   width = int(np.sqrt(MNIST_DIM))
   with torch.no_grad():
@@ -43,27 +65,29 @@ def sampling(model: Module, n, path, device):
     save_image(samples.view(n, 1, width, width), path)
 
 def scatter_latent_space(zs,labels,path):
-  colors = cm.rainbow(np.linspace(0, 1, len(np.unique(labels))))
+  fcn = lambda l: '{}-{}'.format(l[0],l[1]) if type(l) == np.ndarray else l
+  labels_u = np.unique([fcn(l) for l in labels])
+  colors = cm.rainbow(np.linspace(0, 1, len(labels_u)))
   fig, ax = plt.subplots()
   for i in range(len(colors)):
-    idx = np.where(labels==i)[0]
-    ax.scatter([zs[i,0] for i in idx],[zs[i,1] for i in idx],c=[colors[i] for _ in idx], label=i, alpha=0.6, edgecolors="none", cmap="rainbow")
+    sel_zs = np.array([z for j,z in enumerate(zs) if fcn(labels[j]) == labels_u[i]])
+    ax.scatter(sel_zs[:,0],sel_zs[:,1],c=[colors[i] for _ in sel_zs], label=labels_u[i], edgecolors="none", cmap="rainbow")
   ax.legend()
   ax.grid(True)
   fig.savefig(path, dpi=300)
 
-def train(model: Module, device, total_epochs):
+def train(model: Module, device, total_epochs, loss_function, get_train_loader, get_test_loader, path):
   optimizer = torch.optim.Adam(model.parameters())
   def train_epoch(epoch):
-    train_loader = get_mnist_train_loader()
+    train_loader = get_train_loader()
     model.train()
     train_loss = 0
     pbar = tqdm(enumerate(train_loader))
     for batch_idx, (data, _) in pbar:
-      data = data.to(device)
+      data = data.to(device).float()
       optimizer.zero_grad()
       x_hat, mu, logvar, _ = model(data)
-      loss = compute_loss(x_hat, data, mu, logvar)
+      loss = loss_function(x_hat.view(-1,model.dim*MNIST_DIM), data.view(-1,model.dim*MNIST_DIM), mu, logvar)
       loss.backward()
       train_loss += loss.item()
       optimizer.step()
@@ -71,16 +95,16 @@ def train(model: Module, device, total_epochs):
       pbar.set_description("Train Epoch: {}/{}\tLoss: {:.6f}".format(epoch,total_epochs,loss.item()/len(data)))
     logger.info("=====> Epoch: {} Average Train Loss: {:.4f}".format(epoch,train_loss/len(train_loader.dataset)))
   def test_epoch(epoch):
-    test_loader = get_mnist_test_loader()
+    test_loader = get_test_loader()
     model.eval()
     test_loss = 0
     zs = []
     labels = []
     with torch.no_grad():
       for data,y in test_loader:
-        data = data.to(device)
+        data = data.to(device).float()
         x_hat, mu, logvar, z = model(data)
-        loss = compute_loss(x_hat, data, mu, logvar)
+        loss = loss_function(x_hat.view(-1,model.dim*MNIST_DIM), data.view(-1,MNIST_DIM*model.dim), mu, logvar)
         test_loss += loss.item()
         z = z.cpu().numpy()
         y = y.cpu().numpy()
@@ -88,16 +112,28 @@ def train(model: Module, device, total_epochs):
         labels.extend(y)
     test_loss /= len(test_loader.dataset)
     logger.info("=====> Epoch {} Average Test Loss: {:.4f}".format(epoch, test_loss))
-    scatter_latent_space(np.vstack(zs), np.vstack(labels).astype("int").squeeze(), "results/distributions-{}.png".format(epoch))
+    scatter_latent_space(np.vstack(zs), np.vstack(labels).squeeze(), os.path.join(path,"distributions-{}.png".format(epoch)))
 
+  return train_epoch, test_epoch
 
+def train_mnist(model: Module, device, total_epochs, path):
+  train_epoch,test_epoch = train(model, device, total_epochs, 
+                  compute_loss_mnist, get_mnist_train_loader, get_mnist_test_loader, path)
   for epoch in range(1,total_epochs+1):
     train_epoch(epoch)
     test_epoch(epoch)
-    reconstruct(model, next(iter(get_mnist_test_loader(batch_size=8)))[0].to(device), 
-                      "results/reconstruction-{}.png".format(epoch))
-    sampling(model, 64, "results/sampling-{}.png".format(epoch),device)
+    reconstruct_mnist(model, next(iter(get_mnist_test_loader(batch_size=8)))[0].to(device), 
+                      os.path.join(path,"reconstruction-{}.png".format(epoch)))
+    sampling_mnist(model, 64, os.path.join(path,"sampling-{}.png".format(epoch)),device)
 
+def train_synthetic_timeseries(model: Module, device, total_epochs,path):
+  train_epoch,test_epoch = train(model, device, total_epochs, compute_loss_timeseries, 
+          get_synthetic_timeseries_train_loader, get_synthetic_timeseries_test_loader, path)
+  for epoch in range(1,total_epochs+1):
+    train_epoch(epoch)
+    test_epoch(epoch)
+    reconstruct_timeseries(model, next(iter(get_synthetic_timeseries_test_loader(batch_size=8)))[0].to(device), 
+                      os.path.join(path,"timeseries-reconstruction-{}.png".format(epoch)))
 
 if __name__ == "__main__":
   parser = ArgumentParser(description="VAE example")
@@ -107,17 +143,28 @@ if __name__ == "__main__":
                     help='Dropout probability to set inputs zero. (default: 0.5)')
   parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
-  model_filepath = "model.pth"
+  parser.add_argument('--train_mode', type=str, default="mnist", metavar='S',
+                    help='Training mode selection. Choices: mnist, synthetic_timeseries. (default: mnist)')
   args = parser.parse_args()
+  model_filepath = "model-{}.pth".format(args.train_mode)
+  root_path = "results/{}".format(args.train_mode)
+  try:
+    os.makedirs(root_path)
+  except:
+    pass
   is_cuda= not args.no_cuda
   device = torch.device("cuda" if is_cuda else "cpu")
-  model = VAE(dropout=args.dropout).to(device)
+  model = VAE(dropout=args.dropout, dim=4).to(device)
   try:
     model = load_model(model_filepath, model)
     logger.info("Loading model from {}".format(model_filepath))
   except:
     logger.info("Creating VAE model from scratch")
-  train(model, device, args.epochs)
+  if args.train_mode == 'mnist':
+    train_mnist(model, device, args.epochs, root_path)
+  elif args.train_mode == "synthetic_timeseries":
+    model.decoder.sigmoid=False # disable sigmoid from the final decoder layer
+    train_synthetic_timeseries(model, device, args.epochs, root_path)
   model.to(torch.device("cpu"))
   store_model(model_filepath, model)
 
