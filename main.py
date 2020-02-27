@@ -4,8 +4,9 @@ from torch.nn import functional as F
 from torchvision.utils import save_image
 from tqdm import tqdm
 from modules import VAE, MNIST_DIM
-from utils import (get_mnist_train_loader, get_mnist_test_loader, get_logger, store_model, 
-        load_model, get_synthetic_timeseries_test_loader, get_synthetic_timeseries_train_loader)
+from utils import (get_mnist_train_loader, get_mnist_test_loader, get_logger, store_model,
+        load_model, get_synthetic_timeseries_test_loader, get_synthetic_timeseries_train_loader,
+        get_cell_timeseries_train_loader, get_cell_timeseries_test_loader)
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.cm as cm
@@ -50,8 +51,8 @@ def reconstruct_timeseries(model: Module, data, path):
     x_hat = x_hat.cpu().numpy()
     x = data.cpu().numpy()
     for i in range(n):
-      xi = x[i][0] if model.dim > 1 else x[i]
-      x_hati = x_hat[i][0] if model.dim > 1 else x_hat[i]
+      xi = x[i][0] if len(x.shape) > 2 else x[i]
+      x_hati = x_hat[i][0] if len(x.shape) > 2 else x_hat[i]
       ax[i].plot(xi,'b-')
       ax[i].plot(x_hati,'r-')
   fig.savefig(path, dpi=300)
@@ -87,7 +88,7 @@ def train(model: Module, device, total_epochs, loss_function, get_train_loader, 
       data = data.to(device).float()
       optimizer.zero_grad()
       x_hat, mu, logvar, _ = model(data)
-      loss = loss_function(x_hat.view(-1,model.dim*MNIST_DIM), data.view(-1,model.dim*MNIST_DIM), mu, logvar)
+      loss = loss_function(x_hat.view(-1,model.input_dim), data.view(-1,model.input_dim), mu, logvar)
       loss.backward()
       train_loss += loss.item()
       optimizer.step()
@@ -104,7 +105,7 @@ def train(model: Module, device, total_epochs, loss_function, get_train_loader, 
       for data,y in test_loader:
         data = data.to(device).float()
         x_hat, mu, logvar, z = model(data)
-        loss = loss_function(x_hat.view(-1,model.dim*MNIST_DIM), data.view(-1,MNIST_DIM*model.dim), mu, logvar)
+        loss = loss_function(x_hat.view(-1,model.input_dim), data.view(-1,model.input_dim), mu, logvar)
         test_loss += loss.item()
         z = z.cpu().numpy()
         y = y.cpu().numpy()
@@ -135,7 +136,21 @@ def train_synthetic_timeseries(model: Module, device, total_epochs,path):
     reconstruct_timeseries(model, next(iter(get_synthetic_timeseries_test_loader(batch_size=8)))[0].to(device), 
                       os.path.join(path,"timeseries-reconstruction-{}.png".format(epoch)))
 
+def train_cell_timeseries(model: Module, device, total_epochs,path):
+  train_epoch,test_epoch = train(model, device, total_epochs, compute_loss_timeseries, 
+          get_cell_timeseries_train_loader, get_cell_timeseries_test_loader, path)
+  for epoch in range(1,total_epochs+1):
+    train_epoch(epoch)
+    test_epoch(epoch)
+    reconstruct_timeseries(model, next(iter(get_cell_timeseries_train_loader(batch_size=10)))[0].to(device), 
+                      os.path.join(path,"timeseries-reconstruction-{}.png".format(epoch)))
+
 if __name__ == "__main__":
+  input_dims = {
+    "mnist": MNIST_DIM,
+    "synthetic_timeseries": 4*MNIST_DIM,
+    "cell_timeseries": 35*96
+  }
   parser = ArgumentParser(description="VAE example")
   parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
@@ -144,7 +159,7 @@ if __name__ == "__main__":
   parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
   parser.add_argument('--train_mode', type=str, default="mnist", metavar='S',
-                    help='Training mode selection. Choices: mnist, synthetic_timeseries. (default: mnist)')
+                    help='Training mode selection. Choices: mnist, synthetic_timeseries, cell_timeseries. (default: mnist)')
   args = parser.parse_args()
   model_filepath = "model-{}.pth".format(args.train_mode)
   root_path = "results/{}".format(args.train_mode)
@@ -154,17 +169,21 @@ if __name__ == "__main__":
     pass
   is_cuda= not args.no_cuda
   device = torch.device("cuda" if is_cuda else "cpu")
-  model = VAE(dropout=args.dropout, dim=4).to(device)
+  model = VAE(dropout=args.dropout, input_dim=input_dims[args.train_mode]).to(device)
   try:
     model = load_model(model_filepath, model)
     logger.info("Loading model from {}".format(model_filepath))
   except:
     logger.info("Creating VAE model from scratch")
+    model = VAE(dropout=args.dropout, input_dim=input_dims[args.train_mode]).to(device)
   if args.train_mode == 'mnist':
     train_mnist(model, device, args.epochs, root_path)
   elif args.train_mode == "synthetic_timeseries":
     model.decoder.sigmoid=False # disable sigmoid from the final decoder layer
     train_synthetic_timeseries(model, device, args.epochs, root_path)
+  elif args.train_mode == "cell_timeseries":
+    model.decoder.sigmoid=False # disable sigmoid from the final decoder layer
+    train_cell_timeseries(model, device, args.epochs, root_path)
   model.to(torch.device("cpu"))
   store_model(model_filepath, model)
 

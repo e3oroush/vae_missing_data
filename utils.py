@@ -74,6 +74,19 @@ def get_synthetic_timeseries_test_loader(batch_size=128):
   test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
   return test_loader
 
+def get_timeseries_data_loader(path, batch_size=128, is_cuda=True):
+  kwargs = {'num_workers': 1, 'pin_memory': True} if is_cuda else {}
+  dataset = SyntheticDataset(path)
+  loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, **kwargs)
+  return loader
+
+
+def get_cell_timeseries_train_loader(batch_size=128, is_cuda=True):
+  return get_timeseries_data_loader("data/timeseris-data-train.p", batch_size, is_cuda)
+
+def get_cell_timeseries_test_loader(batch_size=128, is_cuda=True):
+  return get_timeseries_data_loader("data/timeseris-data-test.p", batch_size, is_cuda)
+
 
 def store_model(model_filepath, model):
     checkpoint={'model':model.state_dict(),
