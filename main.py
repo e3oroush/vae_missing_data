@@ -73,7 +73,7 @@ def scatter_latent_space(zs,labels,path):
   for i in range(len(colors)):
     sel_zs = np.array([z for j,z in enumerate(zs) if fcn(labels[j]) == labels_u[i]])
     ax.scatter(sel_zs[:,0],sel_zs[:,1],c=[colors[i] for _ in sel_zs], label=labels_u[i], edgecolors="none", cmap="rainbow")
-  ax.legend()
+  ax.legend(loc="upper left")
   ax.grid(True)
   fig.savefig(path, dpi=300)
 
@@ -148,7 +148,7 @@ def train_cell_timeseries(model: Module, device, total_epochs,path):
 if __name__ == "__main__":
   input_dims = {
     "mnist": MNIST_DIM,
-    "synthetic_timeseries": 4*MNIST_DIM,
+    "synthetic_timeseries": MNIST_DIM,
     "cell_timeseries": 35*96
   }
   parser = ArgumentParser(description="VAE example")

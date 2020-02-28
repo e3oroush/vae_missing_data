@@ -11,8 +11,8 @@ from argparse import ArgumentParser
 
 logger = get_logger("tests")
 
-def test_partial_data():
-  model_filepath="model.pth"
+def test_partial_data_mnist(zp=0.5):
+  model_filepath="model-mnist.pth"
   root_path="results/mnist"
   device = torch.device("cuda")
   p=0.5
@@ -23,7 +23,9 @@ def test_partial_data():
   test_loss = 0
   zs = []
   labels = []
-  mask_np = np.concatenate([np.zeros(MNIST_DIM//2), np.ones(MNIST_DIM//2)]).astype("int")
+  z=int(zp*MNIST_DIM)
+  o=MNIST_DIM-z
+  mask_np = np.concatenate([np.zeros(z), np.ones(o)]).astype("int")
   with torch.no_grad():
     for idx, (data,y) in enumerate(test_loader):
       mask = torch.from_numpy(np.tile(mask_np,(len(data),1,1))).view(data.shape).long()
@@ -42,19 +44,22 @@ def test_partial_data():
     test_loss /= len(test_loader.dataset)
     scatter_latent_space(np.vstack(zs), np.vstack(labels).astype("int").squeeze(), os.path.join(root_path,"distributions-partial.png"))
 
-def test_partial_data_synthetic_ts():
+def test_partial_data_synthetic_ts(zp=0.5):
   model_filepath="model-synthetic_timeseries.pth"
   root_path="results/synthetic_timeseries"
   device = torch.device("cuda")
   p=0.5
   test_loader = get_synthetic_timeseries_test_loader()
-  model = VAE()
+  model = VAE(sigmoid=False)
   model = load_model(model_filepath, model)
   model.to(device)
+  model.eval()
   test_loss = 0
   zs = []
   labels = []
-  mask_np = np.concatenate([np.zeros(MNIST_DIM//2), np.ones(MNIST_DIM//2)]).astype("int")
+  z=int(MNIST_DIM*zp)
+  o=MNIST_DIM-z
+  mask_np = np.concatenate([np.zeros(z), np.ones(o)]).astype("int")
   with torch.no_grad():
     for idx, (data,y) in enumerate(test_loader):
       mask = torch.from_numpy(np.tile(mask_np,(len(data),1,1))).view(data.shape).long()
@@ -110,4 +115,4 @@ if __name__ == "__main__":
   elif args.test_partial_data_synthetic_ts:
     test_partial_data_synthetic_ts()
   elif args.test_partial_data:
-    test_partial_data()
+    test_partial_data_mnist()
