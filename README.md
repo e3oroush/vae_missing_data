@@ -1,6 +1,6 @@
 # Variation Autoencoder with Missing values
 
-A Pytorch implelmentation of VAE for handling missing data in test.
+A Pytorch implelmentation of VAE for handling missing data in test. [Here](https://medium.com/@ebrahim.soroush/variational-auto-encoder-with-missing-data-b975abd0a9c?sk=70b58740c1e214b599ff1c1bc2707ae5) is my medium post.
 
 ## Requirements:
 * [pytorch](http://pytorch.org/)
