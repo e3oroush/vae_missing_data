@@ -105,7 +105,7 @@ if __name__ == "__main__":
   parser.add_argument("--generate_timeseries_synthetic_test",help="Wether to generate test data", action="store_true", default=False)
   parser.add_argument("--generate_timeseries_synthetic_train",help="Wether to generate train data", action="store_true", default=False)
   parser.add_argument("--test_partial_data_synthetic_ts",help="Wether to run test_partial_data_synthetic_ts", action="store_true", default=False)
-  parser.add_argument("--test_partial_data",help="Wether to run test_partial_data", action="store_true", default=False)
+  parser.add_argument("--test_partial_data_mnist",help="Wether to run test_partial_data", action="store_true", default=False)
   parser.add_argument("--ts_dim", default=1, type=int, help="Dimension of synthetic timeseries")
   args = parser.parse_args()
   if args.generate_timeseries_synthetic_test:
@@ -114,5 +114,5 @@ if __name__ == "__main__":
     generate_random_data(dim=args.ts_dim)
   elif args.test_partial_data_synthetic_ts:
     test_partial_data_synthetic_ts()
-  elif args.test_partial_data:
+  elif args.test_partial_data_mnist:
     test_partial_data_mnist()
